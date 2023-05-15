@@ -1,7 +1,8 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from torch.distributions import Categorical
+from torch.distributions import Normal
+import math
 
 class PolicyNet(nn.Module):
     def __init__(self, state_dim, action_dim):
@@ -10,15 +11,25 @@ class PolicyNet(nn.Module):
         self.fc2 = nn.Linear(128, 64)
         self.fc3 = nn.Linear(64, 64)
         self.lstm = nn.LSTM(64, 32)
-        self.fc4 = nn.Linear(32, action_dim)
+        self.fc4 = nn.Linear(32, 32)
+        self.fc5 = nn.Linear(32, 32)
+        self.fc6 = nn.Linear(32, action_dim)
+        self.fc7 = nn.Linear(32, 32)
+        self.fc8 = nn.Linear(32, 32)
+        self.fc9 = nn.Linear(32, action_dim)
     
     def forward(self, x, hidden):
-        x = F.relu(self.fc1(x))
-        x = F.relu(self.fc2(x))
-        x = F.relu(self.fc3(x))
+        x = F.tanh(self.fc1(x))
+        x = F.tanh(self.fc2(x))
+        x = F.tanh(self.fc3(x))
         x, hidden = self.lstm(x, hidden)
-        x = F.softmax(self.fc4(x), dim = 2)
-        return x, hidden
+        mu = F.tanh(self.fc4(x))
+        mu = F.tanh(self.fc5(mu))
+        mu = self.fc6(mu)
+        std = F.tanh(self.fc7(x))
+        std = F.tanh(self.fc8(std))
+        std = self.fc9(std)
+        return mu, std, hidden
 
 
 class ValueNet(nn.Module):
@@ -28,14 +39,16 @@ class ValueNet(nn.Module):
         self.fc2 = nn.Linear(128, 64)
         self.fc3 = nn.Linear(64, 64)
         self.lstm = nn.LSTM(64, 32)
-        self.fc4 = nn.Linear(32, 1)
+        self.fc4 = nn.Linear(32, 32)
+        self.fc5 = nn.Linear(32, 1)
 
     def forward(self, x, hidden):
-        x = F.relu(self.fc1(x))
-        x = F.relu(self.fc2(x))
-        x = F.relu(self.fc3(x))
+        x = F.tanh(self.fc1(x))
+        x = F.tanh(self.fc2(x))
+        x = F.tanh(self.fc3(x))
         x, hidden = self.lstm(x, hidden)
-        x = self.fc4(x)
+        x = F.tanh(self.fc4(x))
+        x = self.fc5(x)
         return x, hidden
     
 
@@ -63,9 +76,11 @@ class PPO:
 
     def take_action(self, state, hidden):
         state = torch.tensor([state], dtype = torch.float).to(self.device)
-        logits, hidden = self.actor(state, hidden)
-        action_dist = Categorical(logits = logits)
-        action = action_dist.sample()
+        mu, std, hidden = self.actor(state, hidden)
+        action = torch.zeros_like(mu)
+        """
+        Modify action
+        """
         return action.item(), hidden
     
     def update(self, transition_dict):
