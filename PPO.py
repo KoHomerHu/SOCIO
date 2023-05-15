@@ -39,6 +39,17 @@ class ValueNet(nn.Module):
         return x, hidden
     
 
+def compute_advantage(gamma, lmbda, td_delta):
+    td_delta = td_delta.detach().numpy()
+    advantage_list = []
+    advantage = 0.0
+    for delta in td_delta[::-1]:
+        advantage = gamma * lmbda * advantage + delta
+        advantage_list.append(advantage)
+    advantage_list.reverse()
+    return torch.tensor(advantage_list, dtype=torch.float)
+    
+
 class PPO:
     def __init__(self, state_dim, action_dim, actor_lr = 1e-3, critic_lr = 1e-2, lmbda = 0.95, eps = 0.2, gamma = 0.98, device):
         self.actor = PolicyNet(state_dim, action_dim).to(device)
@@ -65,18 +76,16 @@ class PPO:
         dones = torch.tensor(transition_dict['dones'], dtype=torch.float).view(-1, 1).to(self.device)
         td_target = rewards + self.gamma * self.critic(next_states) * (1 - dones)
         td_delta = td_target - self.critic(states)
-        advantage = rl_utils.compute_advantage(self.gamma, self.lmbda, td_delta.cpu()).to(self.device)
+        advantage = compute_advantage(self.gamma, self.lmbda, td_delta.cpu()).to(self.device)
         old_log_probs = torch.log(self.actor(states).gather(1, actions)).detach()
 
         for _ in range(self.epochs):
             log_probs = torch.log(self.actor(states).gather(1, actions))
             ratio = torch.exp(log_probs - old_log_probs)
             surr1 = ratio * advantage
-            surr2 = torch.clamp(ratio, 1 - self.eps,
-                                1 + self.eps) * advantage  # 截断
+            surr2 = torch.clamp(ratio, 1 - self.eps, 1 + self.eps) * advantage  # 截断
             actor_loss = torch.mean(-torch.min(surr1, surr2))  # PPO损失函数
-            critic_loss = torch.mean(
-                F.mse_loss(self.critic(states), td_target.detach()))
+            critic_loss = torch.mean(F.mse_loss(self.critic(states), td_target.detach()))
             self.actor_optimizer.zero_grad()
             self.critic_optimizer.zero_grad()
             actor_loss.backward()
